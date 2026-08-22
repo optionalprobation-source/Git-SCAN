@@ -2,6 +2,7 @@ use ethers::providers::{Http, Provider, Middleware};
 use ethers::types::Address;
 use std::sync::Arc;
 use futures::future::join_all;
+use tracing::{info, warn};
 
 pub struct BalanceChecker {
     provider: Arc<Provider<Http>>,
@@ -28,14 +29,72 @@ impl BalanceChecker {
         }
     }
 
-    // NEW: Highly Optimized Concurrent Batch Checking
-    pub async fn check_balances_batch(&self, addresses: &[String]) -> Vec<(String, Result<String, String>)> {
-        let futures = addresses.iter().map(|addr_str| async move {
-            let result = self.get_balance(addr_str).await;
-            (addr_str.clone(), result)
+    // Highly Optimized Concurrent Batch Checking
+    pub async fn check_balances_batch(
+        &self,
+        addresses: &[String],
+    ) -> Vec<(String, Result<String, String>)> {
+        if addresses.is_empty() {
+            return vec![];
+        }
+        
+        info!("🔍 Checking {} addresses in batch", addresses.len());
+        
+        // Create futures for all addresses
+        let futures = addresses.iter().map(|addr_str| {
+            let provider = self.provider.clone();
+            let addr_str = addr_str.clone();
+            
+            async move {
+                let addr = match addr_str.parse::<Address>() {
+                    Ok(a) => a,
+                    Err(e) => return (addr_str, Err(format!("Address error: {}", e))),
+                };
+                
+                match provider.get_balance(addr, None).await {
+                    Ok(balance) => (addr_str, Ok(ethers::utils::format_ether(balance))),
+                    Err(e) => (addr_str, Err(format!("Balance error: {}", e))),
+                }
+            }
         });
         
         // Execute all RPC calls simultaneously
         join_all(futures).await
+    }
+    
+    // Batch with concurrency limit to avoid rate limiting
+    pub async fn check_balances_batch_limited(
+        &self,
+        addresses: &[String],
+        concurrency: usize,
+    ) -> Vec<(String, Result<String, String>)> {
+        use futures::stream::{self, StreamExt};
+        
+        if addresses.is_empty() {
+            return vec![];
+        }
+        
+        let results = stream::iter(addresses.iter().cloned())
+            .map(|addr| {
+                let provider = self.provider.clone();
+                async move {
+                    let addr_parse = addr.parse::<Address>();
+                    match addr_parse {
+                        Ok(a) => {
+                            match provider.get_balance(a, None).await {
+                                Ok(balance) => (addr, Ok(ethers::utils::format_ether(balance))),
+                                Err(e) => (addr, Err(format!("Balance error: {}", e))),
+                            }
+                        }
+                        Err(e) => (addr, Err(format!("Address error: {}", e))),
+                    }
+                }
+            })
+            // Sirf 'concurrency' number ki request ek time pe network pe bhejega
+            .buffer_unordered(concurrency)
+            .collect::<Vec<_>>()
+            .await;
+        
+        results
     }
 }
