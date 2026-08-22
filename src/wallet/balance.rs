@@ -29,7 +29,7 @@ impl BalanceChecker {
         }
     }
 
-    // Highly Optimized Concurrent Batch Checking
+    // Concurrent Batch Checking (Unlimited)
     pub async fn check_balances_batch(
         &self,
         addresses: &[String],
@@ -40,7 +40,6 @@ impl BalanceChecker {
         
         info!("🔍 Checking {} addresses in batch", addresses.len());
         
-        // Create futures for all addresses
         let futures = addresses.iter().map(|addr_str| {
             let provider = self.provider.clone();
             let addr_str = addr_str.clone();
@@ -58,11 +57,10 @@ impl BalanceChecker {
             }
         });
         
-        // Execute all RPC calls simultaneously
         join_all(futures).await
     }
     
-    // Batch with concurrency limit to avoid rate limiting
+    // Batch with concurrency limit (Rate limit protection)
     pub async fn check_balances_batch_limited(
         &self,
         addresses: &[String],
@@ -90,7 +88,6 @@ impl BalanceChecker {
                     }
                 }
             })
-            // Sirf 'concurrency' number ki request ek time pe network pe bhejega
             .buffer_unordered(concurrency)
             .collect::<Vec<_>>()
             .await;
