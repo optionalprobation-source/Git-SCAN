@@ -43,9 +43,6 @@ pub fn is_valid_format(key: &str) -> bool {
         return false;
     }
     
-    if !key.chars().all(|c| c.is_ascii_hexdigit()) {
-        return false;
-    }
-    
-    true
+    // Byte-level check - faster than chars()
+    key.as_bytes().iter().all(|&b| b.is_ascii_hexdigit())
 }
