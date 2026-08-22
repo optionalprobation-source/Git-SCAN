@@ -30,9 +30,6 @@ impl SeedPhraseValidator {
     
     // Check if words are in BIP39 wordlist (simplified - common words check)
     pub fn validate_bip39(&self, seed_phrase: &str) -> bool {
-        // BIP39 wordlist has 2048 words
-        // For performance, we check common patterns instead of full wordlist
-        
         let words: Vec<&str> = seed_phrase.split_whitespace().collect();
         
         // Check for duplicate words (rare in valid seed phrases)
