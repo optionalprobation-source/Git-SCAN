@@ -47,22 +47,26 @@ impl TransferExecutor {
             Err(e) => return Err(format!("Amount error: {}", e)),
         };
         
-        let gas_price = match ethers::utils::parse_units(gas_price_gwei, "gwei") {
-            Ok(v) => v,
-            Err(e) => return Err(format!("Gas price error: {}", e)),
+        // Use EIP-1559 if chain supports it, else legacy
+        let tx = if self.chain_id == 1 || self.chain_id == 56 || self.chain_id == 137 {
+            // EIP-1559 chains
+            TransactionRequest::new()
+                .to(to)
+                .value(amount_wei)
+                .gas(gas_limit)
+                .max_fee_per_gas(ethers::utils::parse_units(gas_price_gwei, "gwei").unwrap())
+        } else {
+            // Legacy chains
+            TransactionRequest::new()
+                .to(to)
+                .value(amount_wei)
+                .gas(gas_limit)
+                .gas_price(ethers::utils::parse_units(gas_price_gwei, "gwei").unwrap())
         };
-        
-        let tx = TransactionRequest::new()
-            .to(to)
-            .value(amount_wei)
-            .gas(gas_limit)
-            .gas_price(gas_price);
         
         info!("📤 Sending from {} to {}", from_address, to_address);
         
-        let send_result = client.send_transaction(tx, None).await;
-        
-        match send_result {
+        match client.send_transaction(tx, None).await {
             Ok(pending) => {
                 let tx_hash = format!("{:?}", pending.tx_hash());
                 Ok(TransferResult {
@@ -88,6 +92,7 @@ impl TransferExecutor {
         }
     }
     
+    // Optimized max amount calculation
     pub fn calculate_max_amount(balance: &str, gas_price_gwei: u64, gas_limit: u64) -> String {
         let balance_eth: f64 = balance.parse().unwrap_or(0.0);
         let gas_cost = (gas_price_gwei as f64 * gas_limit as f64) / 1_000_000_000.0;
