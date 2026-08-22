@@ -9,6 +9,7 @@ use crate::models::scan::{CryptoSecret, SecretType};
 use crate::telegram::alerts::TelegramAlerts;
 use crate::wallet::manager::WalletManager;
 use std::sync::Arc;
+use std::collections::HashSet;
 use tracing::{info, warn};
 use rayon::prelude::*;
 
@@ -18,6 +19,7 @@ pub struct ScanEngine {
     matcher: Arc<PatternMatcher>,
     telegram: Arc<TelegramAlerts>,
     wallet_manager: Arc<WalletManager>,
+    scanned_files: Arc<tokio::sync::RwLock<HashSet<String>>>,
 }
 
 impl ScanEngine {
@@ -33,6 +35,7 @@ impl ScanEngine {
             matcher: Arc::new(PatternMatcher::new()),
             telegram,
             wallet_manager,
+            scanned_files: Arc::new(tokio::sync::RwLock::new(HashSet::new())),
         })
     }
     
@@ -54,7 +57,7 @@ impl ScanEngine {
         }).await;
     }
     
-    // Optimized: Parallel file scanning + batch key processing
+    // Optimized: Parallel + Incremental scanning
     async fn process_event_optimized(&self, event: GitHubEvent, fetcher: CommitFetcher) {
         let repo_name = event.repo.name.clone();
         
@@ -67,7 +70,7 @@ impl ScanEngine {
         let commits = fetcher.fetch_commits(&event).await;
         info!("📝 Processing {} commits", commits.len());
         
-        // Collect all scannable files
+        // Collect all scannable files (with incremental check)
         let mut scan_tasks: Vec<(String, String, String, String)> = Vec::new();
         
         for commit_with_repo in commits {
@@ -80,8 +83,25 @@ impl ScanEngine {
             
             if let Some(files) = &commit_with_repo.commit.files {
                 for file in files {
+                    // Incremental: Skip if file already scanned with same SHA
+                    let file_key = format!("{}:{}:{}", repo, file.filename, commit_sha);
+                    
+                    {
+                        let scanned = self.scanned_files.read().await;
+                        if scanned.contains(&file_key) {
+                            info!("⏭️ Skipping already scanned: {}", file.filename);
+                            continue;
+                        }
+                    }
+                    
                     if should_scan_file(&file.filename) {
                         if let Some(patch) = &file.patch {
+                            // Mark as scanned
+                            {
+                                let mut scanned = self.scanned_files.write().await;
+                                scanned.insert(file_key.clone());
+                            }
+                            
                             scan_tasks.push((
                                 repo.clone(),
                                 commit_sha.clone(),
@@ -100,7 +120,7 @@ impl ScanEngine {
         
         info!("🔍 Scanning {} files in parallel", scan_tasks.len());
         
-        // Parallel scan with Rayon (CPU-bound)
+        // Parallel scan with Rayon
         let scan_results: Vec<(String, String, String, Vec<CryptoSecret>)> = scan_tasks
             .par_iter()
             .filter_map(|(repo, sha, path, patch)| {
