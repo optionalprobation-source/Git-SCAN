@@ -38,7 +38,7 @@ impl PatternMatcher {
                                 secret_type: SecretType::PrivateKey,
                                 value: private_key,
                                 raw_match: matched_text.to_string(),
-                                line_number: None, // Skip line number for speed
+                                line_number: None,
                             });
                         }
                     }
@@ -61,7 +61,7 @@ impl PatternMatcher {
                                 secret_type: SecretType::SeedPhrase,
                                 value: seed_phrase,
                                 raw_match: matched_text.to_string(),
-                                line_number: None, // Skip line number for speed
+                                line_number: None,
                             });
                         }
                     }
