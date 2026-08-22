@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{info, warn, error};
+use futures::stream::StreamExt;
 
 pub struct GitHubEventsPoller {
     client: Client,
@@ -16,7 +17,7 @@ impl GitHubEventsPoller {
         let client = Client::builder()
             .pool_max_idle_per_host(20)
             .tcp_keepalive(Duration::from_secs(60))
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
             .user_agent("git-scanner/1.0")
             .build()
             .unwrap();
@@ -43,7 +44,6 @@ impl GitHubEventsPoller {
                 }
             }
             
-            // Respect rate limits
             sleep(Duration::from_secs(self.config.poll_interval_secs)).await;
         }
     }
@@ -57,7 +57,6 @@ impl GitHubEventsPoller {
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28");
         
-        // Add auth token if available
         let request = if let Some(token) = &self.config.github_token {
             request.header("Authorization", format!("Bearer {}", token))
         } else {
