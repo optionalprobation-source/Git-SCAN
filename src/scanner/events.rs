@@ -1,7 +1,8 @@
 use crate::config::Config;
 use crate::core::TokenRotator;
 use crate::models::github::GitHubEvent;
-use futures::StreamExt; // ✅ Sahi import
+use futures::StreamExt; // ✅ Sahi: futures crate se
+use tokio_tungstenite::tungstenite::Message; // ✅ Sahi: re-exported path
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -22,21 +23,20 @@ impl GitHubEventsPoller {
         F: FnMut(GitHubEvent) + Send + 'static,
     {
         loop {
-            // WebSocket try karo
             match self.connect_websocket().await {
                 Ok(mut stream) => {
                     info!("🌐 WebSocket connected! Live events streaming...");
                     while let Some(msg) = stream.next().await {
                         match msg {
-                            Ok(tungstenite::Message::Text(text)) => {
+                            Ok(Message::Text(text)) => {
                                 if let Ok(event) = serde_json::from_str::<GitHubEvent>(&text) {
                                     if event.event_type == "PushEvent" {
                                         callback(event);
                                     }
                                 }
                             }
-                            Ok(tungstenite::Message::Ping(_)) => {}
-                            Ok(tungstenite::Message::Close(_)) => {
+                            Ok(Message::Ping(_)) => {}
+                            Ok(Message::Close(_)) => {
                                 warn!("WebSocket closed by server");
                                 break;
                             }
@@ -53,7 +53,6 @@ impl GitHubEventsPoller {
                 }
             }
 
-            // Fallback polling 60 second
             info!("🔄 Falling back to polling for 60 seconds...");
             let start = std::time::Instant::now();
             while start.elapsed() < Duration::from_secs(60) {
