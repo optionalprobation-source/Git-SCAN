@@ -68,6 +68,9 @@ parking_lot = "0.12"
 # CPU detection
 num_cpus = "1.16"
 
+# WebSocket client (pure Rust)
+tokio-tungstenite = { version = "0.20", features = ["rustls-tls-webpki-roots"] }
+
 [profile.release]
 opt-level = 3
 lto = "fat"
