@@ -1,8 +1,8 @@
 use crate::config::Config;
 use crate::core::TokenRotator;
 use crate::models::github::GitHubEvent;
-use futures::StreamExt; // ✅ Sahi: futures crate se
-use tokio_tungstenite::tungstenite::Message; // ✅ Sahi: re-exported path
+use futures::StreamExt;
+use tokio_tungstenite::tungstenite::Message;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -23,6 +23,7 @@ impl GitHubEventsPoller {
         F: FnMut(GitHubEvent) + Send + 'static,
     {
         loop {
+            // 1. WebSocket try karo (agar chale to best)
             match self.connect_websocket().await {
                 Ok(mut stream) => {
                     info!("🌐 WebSocket connected! Live events streaming...");
@@ -37,7 +38,7 @@ impl GitHubEventsPoller {
                             }
                             Ok(Message::Ping(_)) => {}
                             Ok(Message::Close(_)) => {
-                                warn!("WebSocket closed by server");
+                                warn!("WebSocket closed");
                                 break;
                             }
                             Err(e) => {
@@ -53,11 +54,13 @@ impl GitHubEventsPoller {
                 }
             }
 
-            info!("🔄 Falling back to polling for 60 seconds...");
-            let start = std::time::Instant::now();
-            while start.elapsed() < Duration::from_secs(60) {
+            // 2. Ultra-fast polling (1 sec per loop)
+            info!("🔄 Polling mode active...");
+            let mut consecutive_errors = 0;
+            loop {
                 match self.fetch_events_polling().await {
                     Ok(events) => {
+                        consecutive_errors = 0;
                         for event in events {
                             if event.event_type == "PushEvent" {
                                 callback(event);
@@ -65,10 +68,19 @@ impl GitHubEventsPoller {
                         }
                     }
                     Err(e) => {
+                        consecutive_errors += 1;
                         warn!("Polling error: {}", e);
+                        if consecutive_errors >= 5 {
+                            error!("Too many errors, waiting 30 seconds...");
+                            sleep(Duration::from_secs(30)).await;
+                            consecutive_errors = 0;
+                        }
                     }
                 }
-                sleep(Duration::from_secs(self.config.poll_interval_secs)).await;
+
+                // Poll interval = max(1, config.poll_interval_secs)
+                let interval = self.config.poll_interval_secs.max(1);
+                sleep(Duration::from_secs(interval)).await;
             }
         }
     }
@@ -107,10 +119,10 @@ impl GitHubEventsPoller {
 
         if status.is_success() {
             let events = response.json::<Vec<GitHubEvent>>().await?;
-            info!("📡 Fetched {} events (polling)", events.len());
+            info!("📡 Fetched {} events", events.len());
             Ok(events)
         } else if status == 403 {
-            error!("GitHub API 403 Forbidden (rate limit)");
+            error!("GitHub API 403 Forbidden");
             Ok(vec![])
         } else {
             error!("GitHub API error: {}", status);
