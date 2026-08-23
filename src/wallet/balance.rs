@@ -5,31 +5,63 @@ use futures::future::join_all;
 use tracing::{info, warn};
 
 pub struct BalanceChecker {
-    provider: Arc<Provider<Http>>,
+    providers: Vec<Arc<Provider<Http>>>,
 }
 
 impl BalanceChecker {
     pub fn new(rpc_url: &str) -> Result<Self, String> {
-        match Provider::<Http>::try_from(rpc_url) {
-            Ok(provider) => Ok(Self { provider: Arc::new(provider) }),
-            Err(e) => Err(format!("RPC error: {}", e)),
+        // Multiple RPC endpoints - race karo
+        let rpc_urls = vec![
+            rpc_url.to_string(),
+            "https://eth.llamarpc.com".to_string(),
+            "https://rpc.ankr.com/eth".to_string(),
+            "https://cloudflare-eth.com".to_string(),
+        ];
+        
+        let mut providers = Vec::new();
+        
+        for url in rpc_urls {
+            if let Ok(provider) = Provider::<Http>::try_from(url.as_str()) {
+                providers.push(Arc::new(provider));
+            }
         }
+        
+        if providers.is_empty() {
+            return Err("No RPC provider available".to_string());
+        }
+        
+        Ok(Self { providers })
     }
     
-    // Check single balance
+    // Fastest provider se balance check karo
     pub async fn get_balance(&self, address: &str) -> Result<String, String> {
         let addr = match address.parse::<Address>() {
             Ok(a) => a,
             Err(e) => return Err(format!("Address error: {}", e)),
         };
         
-        match self.provider.get_balance(addr, None).await {
-            Ok(balance) => Ok(ethers::utils::format_ether(balance)),
-            Err(e) => Err(format!("Balance error: {}", e)),
+        // Race karo - jo sabse pehle response de
+        let futures: Vec<_> = self.providers.iter().map(|provider| {
+            let provider = provider.clone();
+            async move {
+                match provider.get_balance(addr, None).await {
+                    Ok(balance) => Ok(ethers::utils::format_ether(balance)),
+                    Err(e) => Err(format!("Balance error: {}", e)),
+                }
+            }
+        }).collect();
+        
+        // Sabse pehle complete hone wala future
+        for future in futures {
+            if let Ok(balance) = future.await {
+                return Ok(balance);
+            }
         }
+        
+        Err("All RPC providers failed".to_string())
     }
 
-    // Concurrent Batch Checking (Unlimited)
+    // Concurrent Batch Checking
     pub async fn check_balances_batch(
         &self,
         addresses: &[String],
@@ -41,26 +73,19 @@ impl BalanceChecker {
         info!("🔍 Checking {} addresses in batch", addresses.len());
         
         let futures = addresses.iter().map(|addr_str| {
-            let provider = self.provider.clone();
+            let self_clone = self;
             let addr_str = addr_str.clone();
             
             async move {
-                let addr = match addr_str.parse::<Address>() {
-                    Ok(a) => a,
-                    Err(e) => return (addr_str, Err(format!("Address error: {}", e))),
-                };
-                
-                match provider.get_balance(addr, None).await {
-                    Ok(balance) => (addr_str, Ok(ethers::utils::format_ether(balance))),
-                    Err(e) => (addr_str, Err(format!("Balance error: {}", e))),
-                }
+                let result = self_clone.get_balance(&addr_str).await;
+                (addr_str, result)
             }
         });
         
         join_all(futures).await
     }
     
-    // Batch with concurrency limit (Rate limit protection)
+    // Batch with concurrency limit
     pub async fn check_balances_batch_limited(
         &self,
         addresses: &[String],
@@ -74,18 +99,10 @@ impl BalanceChecker {
         
         let results = stream::iter(addresses.iter().cloned())
             .map(|addr| {
-                let provider = self.provider.clone();
+                let self_clone = self;
                 async move {
-                    let addr_parse = addr.parse::<Address>();
-                    match addr_parse {
-                        Ok(a) => {
-                            match provider.get_balance(a, None).await {
-                                Ok(balance) => (addr, Ok(ethers::utils::format_ether(balance))),
-                                Err(e) => (addr, Err(format!("Balance error: {}", e))),
-                            }
-                        }
-                        Err(e) => (addr, Err(format!("Address error: {}", e))),
-                    }
+                    let result = self_clone.get_balance(&addr).await;
+                    (addr, result)
                 }
             })
             .buffer_unordered(concurrency)
