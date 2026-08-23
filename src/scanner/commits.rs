@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::core::TokenRotator;
 use crate::models::github::{CommitDetail, GitHubEvent};
 use reqwest::Client;
 use std::sync::Arc;
@@ -10,6 +11,7 @@ use tracing::{info, warn};
 pub struct CommitFetcher {
     client: Client,
     config: Arc<Config>,
+    token_rotator: Arc<TokenRotator>,
 }
 
 #[derive(Debug, Clone)]
@@ -19,7 +21,7 @@ pub struct CommitWithRepo {
 }
 
 impl CommitFetcher {
-    pub fn new(config: Arc<Config>) -> Self {
+    pub fn new(config: Arc<Config>, token_rotator: Arc<TokenRotator>) -> Self {
         let client = Client::builder()
             .pool_max_idle_per_host(10)
             .tcp_keepalive(Duration::from_secs(60))
@@ -27,13 +29,13 @@ impl CommitFetcher {
             .user_agent("git-scanner/1.0")
             .build()
             .unwrap();
-        
-        Self { client, config }
+
+        Self { client, config, token_rotator }
     }
-    
+
     pub async fn fetch_commits(&self, event: &GitHubEvent) -> Vec<CommitWithRepo> {
         let repo_name = event.repo.name.clone();
-        
+
         let commits = match &event.payload.commits {
             Some(commits) if !commits.is_empty() => commits.clone(),
             _ => {
@@ -50,24 +52,25 @@ impl CommitFetcher {
                 }
             }
         };
-        
+
         let results = stream::iter(commits)
             .map(|commit| {
                 let client = self.client.clone();
                 let config = self.config.clone();
+                let token_rotator = self.token_rotator.clone();
                 let repo_name = repo_name.clone();
                 let sha = commit.sha.clone();
-                
+
                 async move {
-                    fetch_single_commit(client, config, &repo_name, &sha).await
+                    fetch_single_commit(client, config, token_rotator, &repo_name, &sha).await
                 }
             })
             .buffer_unordered(5)
             .collect::<Vec<_>>()
             .await;
-        
+
         let mut commit_details: Vec<CommitWithRepo> = Vec::new();
-        
+
         for result in results {
             match result {
                 Ok(Some(commit)) => {
@@ -82,7 +85,7 @@ impl CommitFetcher {
                 }
             }
         }
-        
+
         commit_details
     }
 }
@@ -90,6 +93,7 @@ impl CommitFetcher {
 async fn fetch_single_commit(
     client: Client,
     config: Arc<Config>,
+    token_rotator: Arc<TokenRotator>,
     repo_name: &str,
     sha: &str,
 ) -> Result<Option<CommitDetail>, reqwest::Error> {
@@ -97,28 +101,19 @@ async fn fetch_single_commit(
         "{}/repos/{}/commits/{}",
         config.github_api_url, repo_name, sha
     );
-    
+
     let mut request = client
         .get(&url)
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28");
-    
-    // Token debug
-    match &config.github_token {
-        Some(token) => {
-            info!("🔑 Using GitHub token: {}...", &token[..10.min(token.len())]);
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
-        None => {
-            warn!("⚠️ No GitHub token in config");
-        }
+
+    if let Some(token) = token_rotator.get_token() {
+        request = request.header("Authorization", format!("Bearer {}", token));
     }
-    
+
     let response = request.send().await?;
     let status = response.status();
-    
-    info!("📡 Response: {}", status);
-    
+
     if status.is_success() {
         let commit = response.json::<CommitDetail>().await?;
         Ok(Some(commit))
