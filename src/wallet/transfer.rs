@@ -47,7 +47,6 @@ impl TransferExecutor {
             Err(e) => return Err(format!("Amount error: {}", e)),
         };
         
-        // LEGACY transaction - sab chains par kaam karta hai
         let tx = TransactionRequest::new()
             .to(to)
             .value(amount_wei)
@@ -56,7 +55,10 @@ impl TransferExecutor {
         
         info!("📤 Sending from {} to {}", from_address, to_address);
         
-        match client.send_transaction(tx, None).await {
+        // FIX: Result ko pehle variable me store karo
+        let send_result = client.send_transaction(tx, None).await;
+        
+        match send_result {
             Ok(pending) => {
                 let tx_hash = format!("{:?}", pending.tx_hash());
                 Ok(TransferResult {
