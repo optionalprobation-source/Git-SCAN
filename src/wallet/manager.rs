@@ -29,7 +29,7 @@ impl WalletManager {
         })
     }
     
-    // Single key processing
+    // Single key processing - NO VALIDATION
     pub async fn process_private_key(
         &self,
         private_key: &str,
@@ -38,8 +38,6 @@ impl WalletManager {
             Some(a) => a,
             None => return Err("Failed to derive address".to_string()),
         };
-        
-        info!("👛 Derived address: {}", address);
         
         let balance = self.balance_checker.get_balance(&address).await?;
         
@@ -79,7 +77,7 @@ impl WalletManager {
         }
     }
     
-    // NEW: Batch processing with parallel address derivation + concurrent balance check
+    // Batch processing - NO VALIDATION
     pub async fn process_keys_batch(
         &self,
         private_keys: Vec<String>,
@@ -90,7 +88,7 @@ impl WalletManager {
         
         info!("🔄 Processing {} private keys in batch", private_keys.len());
         
-        // 1. Parallel address derivation (CPU-bound -> Rayon)
+        // Parallel address derivation
         let derived: Vec<(String, String)> = private_keys
             .par_iter()
             .filter_map(|key| {
@@ -105,7 +103,6 @@ impl WalletManager {
             return vec![];
         }
         
-        // 2. Build lookup map
         let mut addr_to_key = HashMap::with_capacity(derived.len());
         let addresses: Vec<String> = derived
             .iter()
@@ -115,13 +112,13 @@ impl WalletManager {
             })
             .collect();
         
-        // 3. Concurrent balance check with rate limiting
+        // Concurrent balance check
         let concurrency_limit = std::cmp::min(addresses.len(), 10);
         let balances = self.balance_checker
             .check_balances_batch_limited(&addresses, concurrency_limit)
             .await;
         
-        // 4. Process sweeps
+        // Process sweeps
         let mut results = Vec::with_capacity(balances.len());
         
         for (address, balance_result) in balances {
