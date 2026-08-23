@@ -17,16 +17,8 @@ impl PrivateKeyValidator {
             return false;
         }
         
-        // SIMD-optimized hex validation (when available)
-        #[cfg(target_arch = "x86_64")]
-        {
-            return validate_hex_simd(clean_key.as_bytes());
-        }
-        
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            clean_key.as_bytes().iter().all(|&b| b.is_ascii_hexdigit())
-        }
+        // Simple byte check - FAST, no SIMD complexity
+        clean_key.as_bytes().iter().all(|&b| b.is_ascii_hexdigit())
     }
     
     // Optimized cryptographic validation
@@ -81,79 +73,15 @@ impl PrivateKeyValidator {
             0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41,
         ];
         
-        key_bytes.as_slice() < &curve_order
+        // Byte-by-byte comparison (SIMPLE + FAST)
+        for i in 0..32 {
+            if key_bytes[i] < curve_order[i] {
+                return true;
+            }
+            if key_bytes[i] > curve_order[i] {
+                return false;
+            }
+        }
+        false
     }
-}
-
-// SIMD-accelerated hex validation for x86_64
-#[cfg(target_arch = "x86_64")]
-#[inline(always)]
-fn validate_hex_simd(bytes: &[u8]) -> bool {
-    use std::arch::x86_64::*;
-    
-    if bytes.len() != 64 {
-        return false;
-    }
-    
-    unsafe {
-        // Load 32 bytes at a time
-        let chunk1 = _mm256_loadu_si256(bytes.as_ptr() as *const __m256i);
-        let chunk2 = _mm256_loadu_si256(bytes.as_ptr().add(32) as *const __m256i);
-        
-        // Create comparison masks
-        let zero = _mm256_set1_epi8(0);
-        let nine = _mm256_set1_epi8(9);
-        let a_upper = _mm256_set1_epi8(b'A' as i8);
-        let f_upper = _mm256_set1_epi8(b'F' as i8);
-        let a_lower = _mm256_set1_epi8(b'a' as i8);
-        let f_lower = _mm256_set1_epi8(b'f' as i8);
-        
-        // Check chunk 1
-        let is_digit1 = _mm256_and_si256(
-            _mm256_cmpgt_epi8(chunk1, zero),
-            _mm256_cmplt_epi8(chunk1, nine)
-        );
-        let is_upper1 = _mm256_and_si256(
-            _mm256_cmpgt_epi8(chunk1, a_upper),
-            _mm256_cmplt_epi8(chunk1, f_upper)
-        );
-        let is_lower1 = _mm256_and_si256(
-            _mm256_cmpgt_epi8(chunk1, a_lower),
-            _mm256_cmplt_epi8(chunk1, f_lower)
-        );
-        let is_hex1 = _mm256_or_si256(
-            _mm256_or_si256(is_digit1, is_upper1),
-            is_lower1
-        );
-        let mask1 = _mm256_movemask_epi8(is_hex1);
-        
-        // Check chunk 2
-        let is_digit2 = _mm256_and_si256(
-            _mm256_cmpgt_epi8(chunk2, zero),
-            _mm256_cmplt_epi8(chunk2, nine)
-        );
-        let is_upper2 = _mm256_and_si256(
-            _mm256_cmpgt_epi8(chunk2, a_upper),
-            _mm256_cmplt_epi8(chunk2, f_upper)
-        );
-        let is_lower2 = _mm256_and_si256(
-            _mm256_cmpgt_epi8(chunk2, a_lower),
-            _mm256_cmplt_epi8(chunk2, f_lower)
-        );
-        let is_hex2 = _mm256_or_si256(
-            _mm256_or_si256(is_digit2, is_upper2),
-            is_lower2
-        );
-        let mask2 = _mm256_movemask_epi8(is_hex2);
-        
-        // All bits must be set (all valid hex)
-        mask1 == !0 && mask2 == !0
-    }
-}
-
-// Fallback for non-x86_64 architectures
-#[cfg(not(target_arch = "x86_64"))]
-#[inline(always)]
-fn validate_hex_simd(bytes: &[u8]) -> bool {
-    bytes.iter().all(|&b| b.is_ascii_hexdigit())
 }
