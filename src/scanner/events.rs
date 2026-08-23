@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::core::TokenRotator;
 use crate::models::github::GitHubEvent;
-use futures_util::StreamExt;
+use futures::StreamExt; // ✅ Sahi import
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -17,13 +17,12 @@ impl GitHubEventsPoller {
         Self { config, token_rotator }
     }
 
-    /// WebSocket se connect karne ki koshish karta hai; agar fail ho to polling fallback.
     pub async fn run<F>(&self, mut callback: F)
     where
         F: FnMut(GitHubEvent) + Send + 'static,
     {
         loop {
-            // Try WebSocket
+            // WebSocket try karo
             match self.connect_websocket().await {
                 Ok(mut stream) => {
                     info!("🌐 WebSocket connected! Live events streaming...");
@@ -54,7 +53,7 @@ impl GitHubEventsPoller {
                 }
             }
 
-            // Fallback polling for 60 seconds
+            // Fallback polling 60 second
             info!("🔄 Falling back to polling for 60 seconds...");
             let start = std::time::Instant::now();
             while start.elapsed() < Duration::from_secs(60) {
@@ -75,7 +74,12 @@ impl GitHubEventsPoller {
         }
     }
 
-    async fn connect_websocket(&self) -> Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn connect_websocket(&self) -> Result<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
+        >,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         let url = "wss://ws.github.com/events";
         let (stream, _) = tokio_tungstenite::connect_async(url).await?;
         Ok(stream)
