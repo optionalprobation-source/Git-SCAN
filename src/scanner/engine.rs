@@ -38,7 +38,7 @@ impl ScanEngine {
     pub async fn run(self: Arc<Self>) {
         info!("🚀 Scan engine started");
         
-        // 🆕 Health check on startup
+        // Health check on startup
         self.telegram.send_health_check().await;
         
         let poller = GitHubEventsPoller::new(self.config.clone());
@@ -110,7 +110,6 @@ impl ScanEngine {
             for file in files {
                 info!("📄 File: {} (status: {:?})", file.filename, file.status);
                 
-                // Check if file should be scanned
                 let should_scan = should_scan_file(&file.filename);
                 
                 if !should_scan {
@@ -121,7 +120,6 @@ impl ScanEngine {
                 
                 info!("🔍 Should scan {}: true", file.filename);
                 
-                // Try to get content (patch or raw)
                 match &file.patch {
                     Some(patch) => {
                         scanned_files += 1;
@@ -152,14 +150,12 @@ impl ScanEngine {
                         skipped_files += 1;
                         warn!("⚠️ No patch for file: {}", file.filename);
                         
-                        // 🆕 Telegram alert for skipped file
                         self.telegram.send_file_skipped(
                             &repo,
                             &file.filename,
                             "No patch available",
                         ).await;
                         
-                        // 🆕 Try raw_url fetch (fallback)
                         if let Some(raw_url) = &file.raw_url {
                             info!("🔄 Trying raw fetch for {}: {}", file.filename, raw_url);
                             
@@ -214,7 +210,7 @@ impl ScanEngine {
                 }
             }
             
-            // 🆕 Send scan status report for this commit
+            // Send scan status report
             self.telegram.send_scan_status(
                 &repo,
                 total_files,
@@ -226,7 +222,6 @@ impl ScanEngine {
         }
     }
     
-    // 🆕 Raw file fetcher
     async fn fetch_raw_content(&self, raw_url: &str) -> Result<String, String> {
         let client = reqwest::Client::new();
         
@@ -264,7 +259,6 @@ impl ScanEngine {
                     Err(e) => {
                         warn!("Failed: {}", e);
                         
-                        // 🆕 Send error to Telegram
                         self.telegram.send_scan_error(
                             "N/A",
                             "N/A",
@@ -277,7 +271,6 @@ impl ScanEngine {
             SecretType::SeedPhrase => {
                 warn!("Seed phrase not implemented");
                 
-                // 🆕 Send notification
                 self.telegram.send_scan_error(
                     "N/A",
                     "N/A",
